@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Эдмондса–Карпа | Визуализатор</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <!-- Cytoscape.js — граф -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── Header ───────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-logo">EDMONDS<span>–</span>KARP</div>
+    <div class="header-badge">Max-Flow Visualizer</div>
+    <div class="header-badge" style="color:#6b7a8d">O(VE²)</div>
+    <div class="header-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Ожидание</span>
+    </div>
+  </header>
+
+  <!-- ── Workspace ────────────────────────────────────────────────── -->
+  <div class="workspace">
+
+    <!-- Graph canvas -->
+    <div class="graph-area">
+      <div id="cy"></div>
+      <div class="graph-overlay">
+        <div class="graph-tag" id="graphTag">— граф не загружен —</div>
+      </div>
+    </div>
+
+    <!-- Side panel -->
+    <aside class="panel">
+
+      <!-- Stats -->
+      <div class="section">
+        <div class="section-label">Метрики</div>
+        <div class="stats">
+          <div class="stat-card highlight">
+            <div class="stat-card-label">Max Flow</div>
+            <div class="stat-card-value" id="statFlow">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Итерация</div>
+            <div class="stat-card-value" id="statIter">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Δ (узкое место)</div>
+            <div class="stat-card-value" id="statDelta">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-card-label">Всего шагов</div>
+            <div class="stat-card-value" id="statTotal">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current step message -->
+      <div class="section">
+        <div class="section-label">Текущий шаг</div>
+        <div class="log-box" id="logBox">
+          <span class="log-prefix">→ </span>Загрузите граф и запустите алгоритм.
+        </div>
+      </div>
+
+      <!-- Path visualization -->
+      <div class="section">
+        <div class="section-label">Увеличивающий путь</div>
+        <div class="path-display" id="pathDisplay">
+          <span style="color:var(--text-dim);font-size:11px">нет данных</span>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="section">
+        <div class="section-label">Управление</div>
+        <div class="controls">
+          <div class="btn-grid">
+            <button class="btn" id="btnExample">⬡ Пример</button>
+            <button class="btn btn-primary" id="btnRun">▶ Запустить</button>
+          </div>
+          <button class="btn" id="btnNext" disabled>→ Следующий шаг</button>
+          <button class="btn" id="btnReset">↺ Сброс</button>
+        </div>
+      </div>
+
+      <!-- Step History -->
+      <div class="section" id="historySection" style="display:none">
+        <div class="section-label">История шагов</div>
+        <div class="history" id="history"></div>
+      </div>
+
+      <!-- Legend -->
+      <div class="section">
+        <div class="section-label">Легенда</div>
+        <div class="legend">
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:#00e5a0"></div>
+            <span>Источник (source)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:#ff4d6a"></div>
+            <span>Сток (sink)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:#00d4ff"></div>
+            <span>Текущий путь BFS</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:#ffd166"></div>
+            <span>Насыщенное ребро</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-swatch" style="background:#444c58"></div>
+            <span>Обычное ребро</span>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>

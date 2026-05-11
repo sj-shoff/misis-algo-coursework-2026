@@ -1,589 +1,550 @@
 /**
- * Edmonds–Karp Visualizer — app.js
- *
- * Архитектура: MVC-like разделение.
- *   - GraphRenderer   — отрисовка графа в Cytoscape.js
- *   - AlgorithmRunner — взаимодействие с API
- *   - StepController  — управление пошаговым воспроизведением
- *   - UIController    — обновление DOM-элементов панели
- *   - App             — точка входа, связывает все части
+ * Edmonds–Karp Visualizer · app.js
  */
 
 'use strict';
 
-// ─── Константы ────────────────────────────────────────────────────────────────
-
 const API_URL = '/api/solve';
 
-const COLORS = {
-  nodeDefault:  '#1e242c',
-  nodeSource:   '#003d22',
-  nodeSink:     '#3d0010',
-  nodePath:     '#003847',
-  edgeDefault:  '#2a3340',
-  edgePath:     '#00d4ff',
-  edgeSaturated:'#ffd166',
-  textDefault:  '#6b7a8d',
-  textPath:     '#e8edf2',
-  sourceStroke: '#00e5a0',
-  sinkStroke:   '#ff4d6a',
-  pathStroke:   '#00d4ff',
+const C = {
+  nodeBg:      '#1e242c',
+  nodeSrc:     '#003d22',
+  nodeSnk:     '#3d0010',
+  nodePath:    '#2d1b4e',
+  edgeDef:     '#2a3340',
+  edgePath:    '#b829dd',
+  edgeSat:     '#00d4ff',
+  srcStroke:   '#00e5a0',
+  snkStroke:   '#ff4d6a',
+  pathStroke:  '#b829dd',
+  textDef:     '#6b7a8d',
 };
 
-const EXAMPLE_GRAPH = {
-  source: 'S',
-  sink:   'T',
-  edges: [
-    { from: 'S', to: 'A', capacity: 10 },
-    { from: 'S', to: 'B', capacity: 10 },
-    { from: 'A', to: 'B', capacity: 2  },
-    { from: 'A', to: 'C', capacity: 4  },
-    { from: 'A', to: 'D', capacity: 8  },
-    { from: 'B', to: 'D', capacity: 9  },
-    { from: 'C', to: 'T', capacity: 10 },
-    { from: 'D', to: 'C', capacity: 6  },
-    { from: 'D', to: 'T', capacity: 10 },
-  ],
-};
+function generateRandomGraph() {
+  const numMid = 4 + Math.floor(Math.random() * 5);
+  const nodes = ['S'];
+  
+  for (let i = 0; i < numMid; i++) {
+    nodes.push(String.fromCharCode(65 + i));
+  }
+  nodes.push('T');
 
-// ─── GraphRenderer ─────────────────────────────────────────────────────────────
+  const edges = [];
+  const midNodes = nodes.slice(1, -1);
 
-/**
- * GraphRenderer управляет экземпляром Cytoscape и предоставляет
- * высокоуровневые методы отрисовки — остальной код не знает о Cytoscape.
- */
+  const fromSCount = 2 + Math.floor(Math.random() * 3);
+  const shuffledS = [...midNodes].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < fromSCount; i++) {
+    const cap = 12 + Math.floor(Math.random() * 13);
+    edges.push({ from: 'S', to: shuffledS[i], capacity: cap });
+  }
+
+  for (let i = 0; i < midNodes.length; i++) {
+    for (let j = i + 1; j < midNodes.length; j++) {
+      if (Math.random() < 0.45) {
+        const cap = 7 + Math.floor(Math.random() * 11);
+        edges.push({ from: midNodes[i], to: midNodes[j], capacity: cap });
+      }
+    }
+  }
+
+  const toTCount = 2 + Math.floor(Math.random() * 3);
+  const shuffledT = [...midNodes].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < toTCount; i++) {
+    const cap = 10 + Math.floor(Math.random() * 14);
+    edges.push({ from: shuffledT[i], to: 'T', capacity: cap });
+  }
+
+  for (let i = 0; i < midNodes.length - 1; i++) {
+    if (Math.random() < 0.5) {
+      edges.push({ 
+        from: midNodes[i], 
+        to: midNodes[(i + 2) % midNodes.length], 
+        capacity: 8 + Math.floor(Math.random() * 9) 
+      });
+    }
+  }
+
+  const seen = new Set();
+  const uniqueEdges = edges.filter(e => {
+    const key = `${e.from}→${e.to}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  uniqueEdges.sort(() => Math.random() - 0.5);
+
+  return {
+    source: 'S',
+    sink: 'T',
+    edges: uniqueEdges
+  };
+}
+
 class GraphRenderer {
-  /** @param {string} containerId */
   constructor(containerId) {
-    this._source = null;
-    this._sink   = null;
-    this._cy     = cytoscape({
+    this._src = null;
+    this._snk = null;
+    this._cy  = cytoscape({
       container: document.getElementById(containerId),
-      style:     this._buildStyles(),
+      style: this._styles(),
       userZoomingEnabled: true,
       userPanningEnabled: true,
       boxSelectionEnabled: false,
     });
   }
 
-  /** Очищает граф и загружает новые данные. */
-  load(graphData) {
-    this._source = graphData.source;
-    this._sink   = graphData.sink;
+  load(graph) {
+    this._src = graph.source;
+    this._snk = graph.sink;
     this._cy.remove('*');
 
     const nodes = new Set();
-    graphData.edges.forEach(e => { nodes.add(e.from); nodes.add(e.to); });
-
-    nodes.forEach(id => {
-      this._cy.add({
-        data: { id, label: id, isSource: id === this._source, isSink: id === this._sink },
-        classes: this._nodeClass(id),
-      });
+    graph.edges.forEach(e => { 
+      nodes.add(e.from); 
+      nodes.add(e.to); 
     });
 
-    graphData.edges.forEach(e => {
-      this._cy.add({
-        data: {
-          id:       `${e.from}__${e.to}`,
-          source:   e.from,
-          target:   e.to,
-          label:    `0 / ${e.capacity}`,
-          flow:     0,
-          capacity: e.capacity,
-        },
-      });
-    });
+    nodes.forEach(id => this._cy.add({
+      data: { id, label: id },
+      classes: id === this._src ? 'src' : id === this._snk ? 'snk' : '',
+    }));
 
-    this._layout();
+    graph.edges.forEach(e => this._cy.add({
+      data: { 
+        id: `${e.from}__${e.to}`, 
+        source: e.from, 
+        target: e.to,
+        label: `0 / ${e.capacity}`, 
+        capacity: e.capacity, 
+        flow: 0 
+      },
+    }));
+
+    this._cy.layout({
+      name: 'concentric',
+      root: '#S',
+      minNodeSpacing: 80,
+      avoidOverlap: true,
+      avoidOverlapPadding: 30,
+      spacingFactor: 1.2,
+      concentric: function(node) {
+        if (node.id() === 'S') return 0;
+        if (node.id() === 'T') return 3;
+        return 1;
+      },
+      levelWidth: () => 120,
+      padding: 100,
+      animate: true,
+      animationDuration: 800,
+      fit: true
+    }).run();
   }
 
-  /**
-   * Обновляет граф по шагу алгоритма:
-   * 1. Сбрасывает подсветку.
-   * 2. Обновляет метки потока на всех рёбрах.
-   * 3. Подсвечивает увеличивающий путь и вершины.
-   */
-  applyStep(step, source, sink) {
-    // Сбросить всю подсветку
-    this._cy.elements().removeClass('path-edge path-node saturated');
+  applyStep(step) {
+    this._cy.elements().removeClass('path-e path-n saturated');
 
-    // Обновляем метки потока
     step.edges.forEach(e => {
       const edge = this._cy.getElementById(`${e.from}__${e.to}`);
       if (!edge.length) return;
       edge.data('label', `${fmt(e.flow)} / ${fmt(e.capacity)}`);
-      edge.data('flow', e.flow);
-      edge.data('capacity', e.capacity);
-      if (e.flow >= e.capacity) {
-        edge.addClass('saturated');
-      }
+      if (e.flow >= e.capacity) edge.addClass('saturated');
     });
 
-    // Подсвечиваем путь
-    for (let i = 0; i < step.path.length; i++) {
-      const node = this._cy.getElementById(step.path[i]);
-      node.addClass('path-node');
-      if (i < step.path.length - 1) {
-        const edge = this._cy.getElementById(`${step.path[i]}__${step.path[i + 1]}`);
-        edge.addClass('path-edge');
+    step.path.forEach((v, i) => {
+      const node = this._cy.getElementById(v);
+      if (v !== this._src && v !== this._snk) {
+        node.addClass('path-n');
       }
-    }
+      if (i < step.path.length - 1) {
+        this._cy.getElementById(`${step.path[i]}__${step.path[i+1]}`).addClass('path-e');
+      }
+    });
   }
 
-  /** Сбрасывает метки потока к нулю, убирает подсветку. */
   reset() {
-    this._cy.elements().removeClass('path-edge path-node saturated');
+    this._cy.elements().removeClass('path-e path-n saturated');
     this._cy.edges().forEach(e => {
       const cap = e.data('capacity');
       e.data('label', `0 / ${fmt(cap)}`);
-      e.data('flow', 0);
     });
   }
 
-  _nodeClass(id) {
-    if (id === this._source) return 'source-node';
-    if (id === this._sink)   return 'sink-node';
-    return '';
+  clear() { 
+    this._cy.remove('*'); 
   }
 
-  _layout() {
-    const count = this._cy.nodes().length;
-    const name  = count <= 6 ? 'circle' : 'cose';
-    this._cy.layout({
-      name,
-      padding:   60,
-      animate:   true,
-      animationDuration: 500,
-      nodeRepulsion: 6000,
-      idealEdgeLength: 100,
-    }).run();
-  }
-
-  _buildStyles() {
+  _styles() {
     return [
-      {
-        selector: 'node',
-        style: {
-          'width':              38,
-          'height':             38,
-          'label':              'data(label)',
-          'text-valign':        'center',
-          'text-halign':        'center',
-          'font-family':        'JetBrains Mono, monospace',
-          'font-size':          13,
-          'font-weight':        700,
-          'color':              COLORS.textDefault,
-          'background-color':   COLORS.nodeDefault,
-          'border-width':       2,
-          'border-color':       '#2a3340',
-        },
-      },
-      {
-        selector: '.source-node',
-        style: {
-          'background-color':  COLORS.nodeSource,
-          'border-color':      COLORS.sourceStroke,
-          'color':             COLORS.sourceStroke,
-          'border-width':      2.5,
-        },
-      },
-      {
-        selector: '.sink-node',
-        style: {
-          'background-color': COLORS.nodeSink,
-          'border-color':     COLORS.sinkStroke,
-          'color':            COLORS.sinkStroke,
-          'border-width':     2.5,
-        },
-      },
-      {
-        selector: '.path-node',
-        style: {
-          'background-color':  COLORS.nodePath,
-          'border-color':      COLORS.pathStroke,
-          'color':             COLORS.textPath,
-          'border-width':      2.5,
-          // Cytoscape поддерживает box-shadow через overlay
-          'overlay-color':     COLORS.pathStroke,
-          'overlay-padding':   4,
-          'overlay-opacity':   0.12,
-        },
-      },
-      {
-        selector: 'edge',
-        style: {
-          'label':                     'data(label)',
-          'width':                     2,
-          'line-color':                COLORS.edgeDefault,
-          'target-arrow-color':        COLORS.edgeDefault,
-          'target-arrow-shape':        'triangle',
-          'arrow-scale':               1.2,
-          'curve-style':               'bezier',
-          'font-family':               'JetBrains Mono, monospace',
-          'font-size':                 10,
-          'color':                     '#6b7a8d',
-          'text-background-color':     '#0a0c0f',
-          'text-background-opacity':   0.9,
-          'text-background-padding':   '3px',
-          'text-border-width':         1,
-          'text-border-color':         '#222830',
-          'text-border-opacity':       1,
-          'edge-text-rotation':        'autorotate',
-        },
-      },
-      {
-        selector: '.path-edge',
-        style: {
-          'line-color':           COLORS.edgePath,
-          'target-arrow-color':   COLORS.edgePath,
-          'width':                5,
-          'color':                '#e8edf2',
-          'text-background-color':'#003847',
-          'overlay-color':        COLORS.edgePath,
-          'overlay-padding':      3,
-          'overlay-opacity':      0.1,
-        },
-      },
-      {
-        selector: '.saturated',
-        style: {
-          'line-color':         COLORS.edgeSaturated,
-          'target-arrow-color': COLORS.edgeSaturated,
-          'line-style':         'dashed',
-          'line-dash-pattern':  [6, 3],
-        },
-      },
+      { selector: 'node', style: {
+          width: 44, height: 44, label: 'data(label)',
+          'text-valign': 'center', 'text-halign': 'center',
+          'font-family': 'JetBrains Mono, monospace', 'font-size': 14, 'font-weight': 700,
+          color: C.textDef, 'background-color': C.nodeBg,
+          'border-width': 2.5, 'border-color': '#2a3340',
+      }},
+      { selector: '.src', style: {
+          'background-color': C.nodeSrc, 'border-color': C.srcStroke,
+          color: C.srcStroke, 'border-width': 3.5,
+      }},
+      { selector: '.snk', style: {
+          'background-color': C.nodeSnk, 'border-color': C.snkStroke,
+          color: C.snkStroke, 'border-width': 3.5,
+      }},
+      { selector: '.path-n', style: {
+          'background-color': C.nodePath, 'border-color': C.pathStroke,
+          color: '#e8edf2', 'border-width': 3.5,
+      }},
+      { selector: 'edge', style: {
+          label: 'data(label)', width: 2.5,
+          'line-color': C.edgeDef, 'target-arrow-color': C.edgeDef,
+          'target-arrow-shape': 'triangle', 'arrow-scale': 1.3,
+          'curve-style': 'bezier',
+          'font-family': 'JetBrains Mono, monospace', 'font-size': 10.5,
+          color: '#6b7a8d', 'text-background-color': '#0a0c0f',
+          'text-background-opacity': 0.95, 'text-background-padding': '4px',
+      }},
+      { selector: '.path-e', style: {
+          'line-color': '#b829dd', 'target-arrow-color': '#b829dd', 
+          width: 5.5,
+          'line-style': 'solid',
+      }},
+      { selector: '.saturated', style: {
+          'line-color': '#00d4ff', 'target-arrow-color': '#00d4ff',
+          width: 3,
+          'line-style': 'dashed', 'line-dash-pattern': [6, 3],
+      }},
+      { selector: '.path-e.saturated', style: {
+          'line-color': '#b829dd', 'target-arrow-color': '#b829dd',
+          width: 5.5,
+          'line-style': 'solid',
+      }},
     ];
   }
 }
 
-// ─── AlgorithmRunner ───────────────────────────────────────────────────────────
+class StepsTable {
+  constructor(onStepSelect) {
+    this._onSelect  = onStepSelect;
+    this._steps     = [];
+    this._active    = -1;
+    this._tbody     = document.getElementById('stepsBody');
+    this._section   = document.getElementById('tableSection');
+    this._progress  = document.getElementById('tableProgress');
+    this._btnPrev   = document.getElementById('tBtnPrev');
+    this._btnNext   = document.getElementById('tBtnNext');
 
-/**
- * AlgorithmRunner отвечает только за HTTP-взаимодействие с API.
- * Не знает о DOM и Cytoscape.
- */
-class AlgorithmRunner {
-  /**
-   * Отправляет граф на сервер и возвращает результат.
-   * @returns {Promise<{maxFlow: number, steps: Array, minCutSrc: Array}>}
-   */
-  async solve(graphData) {
-    const response = await fetch(API_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(graphData),
+    this._btnPrev.addEventListener('click', () => this._navigate(-1));
+    this._btnNext.addEventListener('click', () => this._navigate(+1));
+  }
+
+  render(steps, source, sink) {
+    this._steps = steps;
+    this._active = -1;
+
+    if (!steps.length) {
+      this._section.style.display = 'none';
+      return;
+    }
+    this._section.style.display = 'flex';
+
+    let cumFlow = 0;
+    const rows = steps.map((step, idx) => {
+      cumFlow += step.bottleneck;
+
+      const edgeMap = Object.fromEntries(step.edges.map(e => [`${e.from}__${e.to}`, e]));
+      const pills = [];
+      for (let i = 0; i < step.path.length - 1; i++) {
+        const key = `${step.path[i]}__${step.path[i+1]}`;
+        const e = edgeMap[key];
+        const sat = e && e.flow >= e.capacity;
+        pills.push(`<span class="edge-pill${sat ? ' saturated' : ''}">${step.path[i]}→${step.path[i+1]}: <span class="flow-num">${e ? fmt(e.flow) : '?'}</span>/${e ? fmt(e.capacity) : '?'}</span>`);
+      }
+
+      const tr = document.createElement('tr');
+      tr.dataset.idx = idx;
+      tr.innerHTML = `
+        <td class="col-num cell-num">${step.iteration}</td>
+        <td class="col-path cell-path">${step.path.join(' → ')}</td>
+        <td class="col-num cell-delta">+${fmt(step.bottleneck)}</td>
+        <td class="col-num cell-total">${fmt(cumFlow)}</td>
+        <td class="col-edges">${pills.join('')}</td>`;
+      tr.addEventListener('click', () => this._select(idx));
+      return tr;
     });
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({ error: 'неизвестная ошибка' }));
-      throw new Error(err.error || `HTTP ${response.status}`);
-    }
+    this._tbody.innerHTML = '';
+    rows.forEach(r => this._tbody.appendChild(r));
+    this._updateProgress();
+  }
 
-    return response.json();
+  activate(idx) { this._select(idx); }
+  deactivate() {
+    this._tbody.querySelectorAll('tr.row-active').forEach(r => r.classList.remove('row-active'));
+    this._active = -1;
+    this._updateProgress();
+  }
+
+  reset() {
+    this._steps = [];
+    this._active = -1;
+    this._tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Нет данных</td></tr>';
+    this._section.style.display = 'none';
+    this._updateProgress();
+  }
+
+  get activeIndex() { return this._active; }
+  get length() { return this._steps.length; }
+
+  _select(idx) {
+    if (idx < 0 || idx >= this._steps.length) return;
+    this._tbody.querySelectorAll('tr.row-active').forEach(r => r.classList.remove('row-active'));
+    const row = this._tbody.querySelector(`tr[data-idx="${idx}"]`);
+    if (row) {
+      row.classList.add('row-active');
+      row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    this._active = idx;
+    this._updateProgress();
+    this._onSelect(idx);
+  }
+
+  _navigate(delta) {
+    const next = this._active + delta;
+    if (next >= 0 && next < this._steps.length) this._select(next);
+  }
+
+  _updateProgress() {
+    const total = this._steps.length;
+    const cur = this._active >= 0 ? this._active + 1 : '—';
+    this._progress.textContent = `${cur} / ${total || '—'}`;
+    this._btnPrev.disabled = this._active <= 0;
+    this._btnNext.disabled = this._active < 0 || this._active >= this._steps.length - 1;
   }
 }
 
-// ─── UIController ──────────────────────────────────────────────────────────────
-
-/**
- * UIController управляет всеми DOM-обновлениями боковой панели.
- * Логика отображения изолирована от логики алгоритма.
- */
 class UIController {
   constructor() {
-    this._els = {
-      statusDot:    document.getElementById('statusDot'),
-      statusText:   document.getElementById('statusText'),
-      graphTag:     document.getElementById('graphTag'),
-      statFlow:     document.getElementById('statFlow'),
-      statIter:     document.getElementById('statIter'),
-      statDelta:    document.getElementById('statDelta'),
-      statTotal:    document.getElementById('statTotal'),
-      logBox:       document.getElementById('logBox'),
-      pathDisplay:  document.getElementById('pathDisplay'),
-      btnExample:   document.getElementById('btnExample'),
-      btnRun:       document.getElementById('btnRun'),
-      btnNext:      document.getElementById('btnNext'),
-      btnReset:     document.getElementById('btnReset'),
-      history:      document.getElementById('history'),
-      histSection:  document.getElementById('historySection'),
+    this.el = {
+      dot:      document.getElementById('statusDot'),
+      txt:      document.getElementById('statusText'),
+      graphTag: document.getElementById('graphTag'),
+      flowTag:  document.getElementById('flowTag'),
+      flow:     document.getElementById('statFlow'),
+      iter:     document.getElementById('statIter'),
+      delta:    document.getElementById('statDelta'),
+      total:    document.getElementById('statTotal'),
+      log:      document.getElementById('logBox'),
+      path:     document.getElementById('pathDisplay'),
+      btnRun:   document.getElementById('btnRun'),
+      btnNext:  document.getElementById('btnNext'),
+      btnEx:    document.getElementById('btnExample'),
+      btnRst:   document.getElementById('btnReset'),
     };
   }
 
   setStatus(type, text) {
-    const dot = this._els.statusDot;
-    dot.className = `status-dot ${type}`;
-    this._els.statusText.textContent = text;
+    this.el.dot.className = `status-dot ${type}`;
+    this.el.txt.textContent = text;
   }
 
-  setGraphTag(text) {
-    this._els.graphTag.textContent = text;
+  setGraphTag(text) { this.el.graphTag.textContent = text; }
+
+  setFlowTag(v) {
+    if (v == null) { this.el.flowTag.style.display = 'none'; return; }
+    this.el.flowTag.style.display = '';
+    this.el.flowTag.textContent = `MAX FLOW = ${fmt(v)}`;
   }
 
-  updateStats({ flow, iter, delta, total }) {
-    if (flow  !== undefined) this._animateValue('statFlow',  flow  === null ? '—' : fmt(flow));
-    if (iter  !== undefined) this._animateValue('statIter',  iter  === null ? '—' : iter);
-    if (delta !== undefined) this._animateValue('statDelta', delta === null ? '—' : fmt(delta));
-    if (total !== undefined) this._animateValue('statTotal', total === null ? '—' : total);
+  stat(id, val) {
+    const el = this.el[id];
+    el.textContent = val == null ? '—' : val;
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
   }
 
-  setLog(html) {
-    this._els.logBox.innerHTML = html;
-  }
+  log(html) { this.el.log.innerHTML = html; }
 
-  setPath(path, source, sink) {
-    const el = this._els.pathDisplay;
-    if (!path || path.length === 0) {
-      el.innerHTML = '<span style="color:var(--text-dim);font-size:11px">нет данных</span>';
-      return;
+  setPath(path, src, snk) {
+    const el = this.el.path;
+    if (!path?.length) {
+      el.innerHTML = '<span class="path-empty">нет данных</span>'; return;
     }
     el.innerHTML = path.map((v, i) => {
-      const cls = v === source ? 'source' : v === sink ? 'sink' : '';
-      const node = `<span class="path-node ${cls}">${v}</span>`;
-      return i < path.length - 1 ? node + '<span class="path-arrow">→</span>' : node;
+      const cls = v === src ? 'src' : v === snk ? 'snk' : '';
+      const node = `<span class="pnode ${cls}">${v}</span>`;
+      return i < path.length - 1 ? node + '<span class="parr">→</span>' : node;
     }).join('');
   }
 
-  setBtns({ run, next, example, reset } = {}) {
-    if (run     !== undefined) this._els.btnRun.disabled     = !run;
-    if (next    !== undefined) this._els.btnNext.disabled    = !next;
-    if (example !== undefined) this._els.btnExample.disabled = !example;
-    if (reset   !== undefined) this._els.btnReset.disabled   = !reset;
-  }
-
-  addHistory(step) {
-    this._els.histSection.style.display = '';
-    const item = document.createElement('div');
-    item.className = 'history-item';
-    item.dataset.iter = step.iteration;
-    item.innerHTML = `
-      <span class="history-num">#${step.iteration}</span>
-      <span class="history-text">${step.path.join(' → ')}  <span style="color:var(--gold)">+${fmt(step.bottleneck)}</span></span>`;
-    this._els.history.appendChild(item);
-    this._els.history.scrollTop = this._els.history.scrollHeight;
-  }
-
-  highlightHistory(iteration) {
-    this._els.history.querySelectorAll('.history-item').forEach(el => {
-      el.classList.toggle('active', Number(el.dataset.iter) === iteration);
-    });
-  }
-
-  clearHistory() {
-    this._els.history.innerHTML = '';
-    this._els.histSection.style.display = 'none';
+  btns({ run, next, ex, rst } = {}) {
+    if (run  !== undefined) this.el.btnRun.disabled  = !run;
+    if (next !== undefined) this.el.btnNext.disabled = !next;
+    if (ex   !== undefined) this.el.btnEx.disabled   = !ex;
+    if (rst  !== undefined) this.el.btnRst.disabled  = !rst;
   }
 
   reset() {
     this.setStatus('', 'Ожидание');
     this.setGraphTag('— граф не загружен —');
-    this.updateStats({ flow: null, iter: null, delta: null, total: null });
-    this.setLog('<span class="log-prefix">→ </span>Загрузите граф и запустите алгоритм.');
+    this.setFlowTag(null);
+    ['flow','iter','delta','total'].forEach(k => this.stat(k, null));
+    this.log('<span class="log-arrow">→</span> Нажмите «Новый пример»');
     this.setPath(null);
-    this.clearHistory();
-    this.setBtns({ run: true, next: false, example: true, reset: true });
-  }
-
-  _animateValue(id, value) {
-    const el = document.getElementById(id);
-    el.textContent = value;
-    el.classList.remove('changed');
-    // reflow trick для перезапуска анимации
-    void el.offsetWidth;
-    el.classList.add('changed');
+    this.btns({ run: true, next: false, ex: true, rst: true });
   }
 }
 
-// ─── StepController ────────────────────────────────────────────────────────────
-
-/**
- * StepController управляет пошаговым воспроизведением результата.
- * Хранит историю шагов и текущую позицию.
- */
-class StepController {
-  constructor(renderer, ui) {
-    this._renderer = renderer;
-    this._ui       = ui;
-    this._steps    = [];
-    this._current  = -1;
-    this._source   = null;
-    this._sink     = null;
-    this._maxFlow  = 0;
-  }
-
-  load(result, graphData) {
-    this._steps   = result.steps;
-    this._current = -1;
-    this._source  = graphData.source;
-    this._sink    = graphData.sink;
-    this._maxFlow = result.maxFlow;
-
-    this._ui.updateStats({
-      total: this._steps.length,
-      flow:  result.maxFlow,
-    });
-    this._ui.setLog(
-      `<span class="log-prefix">✓ </span>Алгоритм выполнен. ` +
-      `Максимальный поток: <span class="log-delta">${fmt(result.maxFlow)}</span>. ` +
-      `Найдено итераций: <b>${this._steps.length}</b>. Нажимайте «Следующий шаг».`
-    );
-    this._ui.setBtns({ next: this._steps.length > 0, run: false });
-    this._ui.setStatus('done', 'Готово к воспроизведению');
-  }
-
-  /** Переходит к следующему шагу. Возвращает false, если шаги закончились. */
-  next() {
-    this._current++;
-    if (this._current >= this._steps.length) {
-      this._finish();
-      return false;
-    }
-    const step = this._steps[this._current];
-    this._renderer.applyStep(step, this._source, this._sink);
-    this._ui.updateStats({ iter: step.iteration, delta: step.bottleneck });
-    this._ui.setPath(step.path, this._source, this._sink);
-    this._ui.setLog(this._formatStepLog(step));
-    this._ui.addHistory(step);
-    this._ui.highlightHistory(step.iteration);
-    this._ui.setStatus('active', `Шаг ${step.iteration} / ${this._steps.length}`);
-
-    if (this._current === this._steps.length - 1) {
-      this._ui.setBtns({ next: false });
-      this._finish();
-    }
-    return true;
-  }
-
-  reset() {
-    this._steps   = [];
-    this._current = -1;
-    this._source  = null;
-    this._sink    = null;
-  }
-
-  _finish() {
-    this._ui.setBtns({ next: false, run: true });
-    this._ui.setStatus('done', `Завершено · поток = ${fmt(this._maxFlow)}`);
-    this._ui.setLog(
-      `<span class="log-prefix" style="color:var(--green)">✓ </span>` +
-      `Все увеличивающие пути исчерпаны. ` +
-      `<span class="log-delta">Max Flow = ${fmt(this._maxFlow)}</span>`
-    );
-  }
-
-  _formatStepLog(step) {
-    return (
-      `<span class="log-prefix">→ </span>` +
-      `Итерация <b>${step.iteration}</b>: путь ` +
-      `<span class="log-path">[${step.path.join(' → ')}]</span> · ` +
-      `узкое место Δ = <span class="log-delta">${fmt(step.bottleneck)}</span>`
-    );
-  }
-}
-
-// ─── App ───────────────────────────────────────────────────────────────────────
-
-/**
- * App — точка сборки. Связывает компоненты, регистрирует обработчики событий.
- */
 class App {
   constructor() {
-    this._renderer   = new GraphRenderer('cy');
-    this._runner     = new AlgorithmRunner();
-    this._ui         = new UIController();
-    this._stepper    = new StepController(this._renderer, this._ui);
-    this._graphData  = null;
+    this._graph  = null;
+    this._result = null;
+    this._cursor = -1;
+
+    this._ui       = new UIController();
+    this._renderer = new GraphRenderer('cy');
+    this._table    = new StepsTable(idx => this._jumpToStep(idx));
 
     this._ui.reset();
-    this._bindEvents();
+    this._bindKeys();
+    this._bindBtns();
   }
 
-  _bindEvents() {
-    document.getElementById('btnExample').addEventListener('click', () => this._loadExample());
-    document.getElementById('btnRun').addEventListener('click',     () => this._run());
-    document.getElementById('btnNext').addEventListener('click',    () => this._next());
-    document.getElementById('btnReset').addEventListener('click',   () => this._reset());
+  _bindBtns() {
+    document.getElementById('btnExample').onclick = () => this._loadExample();
+    document.getElementById('btnRun').onclick     = () => this._run();
+    document.getElementById('btnNext').onclick    = () => this._nextStep();
+    document.getElementById('btnReset').onclick   = () => this._reset();
+  }
 
-    // Клавиша → для удобства пошагового просмотра
+  _bindKeys() {
     document.addEventListener('keydown', e => {
-      if (e.key === 'ArrowRight' && !document.getElementById('btnNext').disabled) {
-        this._next();
-      }
+      if (e.key === 'ArrowRight' && !document.getElementById('btnNext').disabled) this._nextStep();
+      if (e.key === 'ArrowLeft') this._prevStep();
     });
   }
 
   _loadExample() {
-    this._graphData = EXAMPLE_GRAPH;
-    this._renderer.load(this._graphData);
+    this._graph  = generateRandomGraph();
+    this._result = null;
+    this._cursor = -1;
+
+    this._renderer.load(this._graph);
+    this._table.reset();
+    this._ui.reset();
+
     this._ui.setStatus('active', 'Граф загружен');
-    this._ui.setGraphTag(`|V|=${countNodes(this._graphData)}  |E|=${this._graphData.edges.length}`);
-    this._ui.setLog(
-      '<span class="log-prefix">→ </span>Пример графа загружен. ' +
-      'Нажмите «Запустить» для выполнения алгоритма.'
-    );
-    this._ui.updateStats({ flow: null, iter: null, delta: null, total: null });
-    this._ui.clearHistory();
-    this._ui.setBtns({ run: true, next: false, example: true, reset: true });
-    this._stepper.reset();
+    const nodeCount = countNodes(this._graph);
+    const edgeCount = this._graph.edges.length;
+    this._ui.setGraphTag(`|V| = ${nodeCount}  |E| = ${edgeCount}`);
+
+    this._ui.log('<span class="log-arrow">→</span> Новый граф готов.<br>Нажмите <b>Запустить</b>.');
+    this._ui.btns({ run: true, next: false, ex: true, rst: true });
   }
 
   async _run() {
-    if (!this._graphData) {
-      this._ui.setLog(
-        '<span style="color:var(--red)">✗ </span>Сначала загрузите граф.'
-      );
+    if (!this._graph) {
+      this._ui.log('<span style="color:var(--red)">✗</span> Граф не загружен.');
       return;
     }
 
-    this._ui.setBtns({ run: false, next: false, example: false, reset: false });
+    this._ui.btns({ run: false, next: false, ex: false, rst: false });
     this._ui.setStatus('running', 'Вычисление...');
-    this._ui.setLog('<span class="log-prefix">⟳ </span>Отправка запроса на сервер...');
+    this._ui.log('<span class="log-arrow">⟳</span> Запрос к серверу...');
+
     this._renderer.reset();
-    this._ui.clearHistory();
+    this._table.reset();
+    this._cursor = -1;
 
     try {
-      const result = await this._runner.solve(this._graphData);
-      this._stepper.load(result, this._graphData);
-      this._ui.setBtns({ reset: true, example: true });
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this._graph),
+      });
+
+      if (!res.ok) throw new Error((await res.json()).error || 'Ошибка сервера');
+
+      this._result = await res.json();
+      this._onResult();
     } catch (err) {
       this._ui.setStatus('', 'Ошибка');
-      this._ui.setLog(
-        `<span style="color:var(--red)">✗ </span>Ошибка: ${err.message}`
-      );
-      this._ui.setBtns({ run: true, next: false, example: true, reset: true });
+      this._ui.log(`<span style="color:var(--red)">✗</span> ${err.message}`);
+      this._ui.btns({ run: true, next: false, ex: true, rst: true });
     }
   }
 
-  _next() {
-    this._stepper.next();
+  _onResult() {
+    const { maxFlow, steps } = this._result;
+    this._table.render(steps, this._graph.source, this._graph.sink);
+
+    this._ui.stat('flow', maxFlow);
+    this._ui.stat('total', steps.length);
+    this._ui.stat('iter', null);
+    this._ui.stat('delta', null);
+    this._ui.setFlowTag(maxFlow);
+    this._ui.setStatus('done', 'Готово');
+
+    this._ui.log(`<span class="log-arrow" style="color:var(--green)">✓</span> Max Flow = <b style="color:var(--accent)">${fmt(maxFlow)}</b>. Итераций: <b>${steps.length}</b>.`);
+    this._ui.btns({ run: false, next: steps.length > 0, ex: true, rst: true });
+  }
+
+  _jumpToStep(idx) {
+    if (!this._result?.steps?.length) return;
+    const steps = this._result.steps;
+    if (idx < 0 || idx >= steps.length) return;
+
+    this._cursor = idx;
+    const step = steps[idx];
+
+    this._renderer.applyStep(step);
+    this._ui.stat('iter', step.iteration);
+    this._ui.stat('delta', step.bottleneck);
+    this._ui.setPath(step.path, this._graph.source, this._graph.sink);
+    this._ui.log(`<span class="log-arrow">→</span> Итерация <b>${step.iteration}</b>: путь <span style="color:var(--green)">[${step.path.join(' → ')}]</span> · Δ = <span style="color:var(--gold)">${fmt(step.bottleneck)}</span>`);
+    this._ui.setStatus('active', `Шаг ${step.iteration} / ${steps.length}`);
+
+    if (this._table.activeIndex !== idx) this._table.activate(idx);
+    this._ui.btns({ next: idx < steps.length - 1 });
+
+    if (idx === steps.length - 1) {
+      this._ui.setStatus('done', `Завершено · Max Flow = ${fmt(this._result.maxFlow)}`);
+    }
+  }
+
+  _nextStep() {
+    const next = this._cursor + 1;
+    if (this._result?.steps && next < this._result.steps.length) this._jumpToStep(next);
+  }
+
+  _prevStep() {
+    const prev = this._cursor - 1;
+    if (prev >= 0) this._jumpToStep(prev);
   }
 
   _reset() {
-    this._graphData = null;
-    this._stepper.reset();
-    this._renderer._cy.remove('*');
+    this._graph = null;
+    this._result = null;
+    this._cursor = -1;
+    this._renderer.clear();
+    this._table.reset();
     this._ui.reset();
   }
 }
 
-// ─── Утилиты ──────────────────────────────────────────────────────────────────
-
-/** Форматирует число: целые без дробной части, дробные до 1 знака. */
 function fmt(n) {
+  if (n == null) return '?';
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-/** Считает уникальные вершины в графе. */
-function countNodes(graphData) {
+function countNodes(graph) {
   const s = new Set();
-  graphData.edges.forEach(e => { s.add(e.from); s.add(e.to); });
+  graph.edges.forEach(e => { s.add(e.from); s.add(e.to); });
   return s.size;
 }
 
-// ─── Инициализация ─────────────────────────────────────────────────────────────
-
-document.addEventListener('DOMContentLoaded', () => {
-  window.__app = new App();
+document.addEventListener('DOMContentLoaded', () => { 
+  window.__app = new App(); 
 });

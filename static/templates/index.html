@@ -1,131 +1,156 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Эдмондса–Карпа | Визуализатор</title>
-  <link rel="stylesheet" href="/css/style.css">
-  <!-- Cytoscape.js — граф -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Эдмондса–Карпа | Визуализатор</title>
+    <link rel="stylesheet" href="/css/style.css" />
 
-<div class="app">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
 
-  <!-- ── Header ───────────────────────────────────────────────────── -->
-  <header class="header">
-    <div class="header-logo">EDMONDS<span>–</span>KARP</div>
-    <div class="header-badge">Max-Flow Visualizer</div>
-    <div class="header-badge" style="color:#6b7a8d">O(VE²)</div>
-    <div class="header-status">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">Ожидание</span>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-dagre/2.5.0/cytoscape-dagre.min.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="header-left">
+          <div class="header-logo">
+            EDMONDS<span class="accent">–</span>KARP
+          </div>
+          <div class="header-badges">
+            <span class="badge">Max-Flow Visualizer</span>
+            <span class="badge muted">O(VE²)</span>
+            <span class="badge muted">BFS-based</span>
+          </div>
+        </div>
+        <div class="header-status">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Ожидание</span>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <div class="graph-area">
+          <div id="cy"></div>
+          <div class="graph-corner-tags">
+            <span class="corner-tag" id="graphTag">— граф не загружен —</span>
+            <span
+              class="corner-tag accent-tag"
+              id="flowTag"
+              style="display: none"
+            ></span>
+          </div>
+        </div>
+
+        <aside class="panel">
+          <div class="section">
+            <div class="section-label">Метрики</div>
+            <div class="stats-grid">
+              <div class="stat highlight">
+                <div class="stat-name">Max Flow</div>
+                <div class="stat-val" id="statFlow">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat-name">Итерация</div>
+                <div class="stat-val" id="statIter">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat-name">Δ узкое место</div>
+                <div class="stat-val" id="statDelta">—</div>
+              </div>
+              <div class="stat">
+                <div class="stat-name">Всего шагов</div>
+                <div class="stat-val" id="statTotal">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-label">Текущий шаг</div>
+            <div class="log-box" id="logBox">
+              <span class="log-arrow">→</span> Загрузите граф и запустите
+              алгоритм.
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-label">Увеличивающий путь</div>
+            <div class="path-display" id="pathDisplay">
+              <span class="path-empty">нет данных</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-label">Управление</div>
+            <div class="btn-grid2">
+              <button class="btn" id="btnExample">⬡ Пример</button>
+              <button class="btn btn-primary" id="btnRun">▶ Запустить</button>
+            </div>
+            <button class="btn btn-next" id="btnNext" disabled>
+              → Следующий шаг <kbd>→</kbd>
+            </button>
+            <button class="btn btn-reset" id="btnReset">↺ Сброс</button>
+          </div>
+
+          <div class="section">
+            <div class="section-label">Легенда</div>
+            <div class="legend">
+              <div class="legend-item">
+                <span class="dot" style="background: #00e5a0"></span>Источник
+                (source)
+              </div>
+              <div class="legend-item">
+                <span class="dot" style="background: #ff4d6a"></span>Сток (sink)
+              </div>
+              <div class="legend-item">
+                <span class="dot" style="background: #b829dd"></span>Путь BFS
+              </div>
+              <div class="legend-item"> 
+                <span class="dot dot-dashed" style="background:#0a0c0f; border:2px dashed #00d4ff"></span>Насыщенное ребро
+              </div>
+              <div class="legend-item">
+                <span class="dot" style="background: #2a3340"></span>Обычное ребро
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <section class="table-section" id="tableSection" style="display: none">
+        <div class="table-header-row">
+          <div class="table-title">
+            ≡ История итераций
+            <span class="table-hint">← кликни строку для просмотра шага</span>
+          </div>
+          <div class="table-nav">
+            <button class="tbtn" id="tBtnPrev">‹</button>
+            <span class="table-progress" id="tableProgress">— / —</span>
+            <button class="tbtn" id="tBtnNext">›</button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table class="steps-table">
+            <thead>
+              <tr>
+                <th class="col-num">#</th>
+                <th class="col-path">Путь BFS</th>
+                <th class="col-num">Δ</th>
+                <th class="col-num">Σ Поток</th>
+                <th class="col-edges">Состояние потока на рёбрах пути</th>
+              </tr>
+            </thead>
+            <tbody id="stepsBody">
+              <tr class="empty-row">
+                <td colspan="5">Нет данных</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
-  </header>
 
-  <!-- ── Workspace ────────────────────────────────────────────────── -->
-  <div class="workspace">
-
-    <!-- Graph canvas -->
-    <div class="graph-area">
-      <div id="cy"></div>
-      <div class="graph-overlay">
-        <div class="graph-tag" id="graphTag">— граф не загружен —</div>
-      </div>
-    </div>
-
-    <!-- Side panel -->
-    <aside class="panel">
-
-      <!-- Stats -->
-      <div class="section">
-        <div class="section-label">Метрики</div>
-        <div class="stats">
-          <div class="stat-card highlight">
-            <div class="stat-card-label">Max Flow</div>
-            <div class="stat-card-value" id="statFlow">—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-label">Итерация</div>
-            <div class="stat-card-value" id="statIter">—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-label">Δ (узкое место)</div>
-            <div class="stat-card-value" id="statDelta">—</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-card-label">Всего шагов</div>
-            <div class="stat-card-value" id="statTotal">—</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Current step message -->
-      <div class="section">
-        <div class="section-label">Текущий шаг</div>
-        <div class="log-box" id="logBox">
-          <span class="log-prefix">→ </span>Загрузите граф и запустите алгоритм.
-        </div>
-      </div>
-
-      <!-- Path visualization -->
-      <div class="section">
-        <div class="section-label">Увеличивающий путь</div>
-        <div class="path-display" id="pathDisplay">
-          <span style="color:var(--text-dim);font-size:11px">нет данных</span>
-        </div>
-      </div>
-
-      <!-- Controls -->
-      <div class="section">
-        <div class="section-label">Управление</div>
-        <div class="controls">
-          <div class="btn-grid">
-            <button class="btn" id="btnExample">⬡ Пример</button>
-            <button class="btn btn-primary" id="btnRun">▶ Запустить</button>
-          </div>
-          <button class="btn" id="btnNext" disabled>→ Следующий шаг</button>
-          <button class="btn" id="btnReset">↺ Сброс</button>
-        </div>
-      </div>
-
-      <!-- Step History -->
-      <div class="section" id="historySection" style="display:none">
-        <div class="section-label">История шагов</div>
-        <div class="history" id="history"></div>
-      </div>
-
-      <!-- Legend -->
-      <div class="section">
-        <div class="section-label">Легенда</div>
-        <div class="legend">
-          <div class="legend-item">
-            <div class="legend-swatch" style="background:#00e5a0"></div>
-            <span>Источник (source)</span>
-          </div>
-          <div class="legend-item">
-            <div class="legend-swatch" style="background:#ff4d6a"></div>
-            <span>Сток (sink)</span>
-          </div>
-          <div class="legend-item">
-            <div class="legend-swatch" style="background:#00d4ff"></div>
-            <span>Текущий путь BFS</span>
-          </div>
-          <div class="legend-item">
-            <div class="legend-swatch" style="background:#ffd166"></div>
-            <span>Насыщенное ребро</span>
-          </div>
-          <div class="legend-item">
-            <div class="legend-swatch" style="background:#444c58"></div>
-            <span>Обычное ребро</span>
-          </div>
-        </div>
-      </div>
-
-    </aside>
-  </div>
-</div>
-
-<script src="/js/app.js"></script>
-</body>
+    <script src="/js/app.js"></script>
+  </body>
 </html>

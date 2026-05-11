@@ -31,7 +31,7 @@ func (h *SolverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req dto.SolveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Warn("failed to decode request", "error", err)
-		h.writeError(w, "wrong format", http.StatusBadRequest)
+		h.writeError(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
@@ -44,7 +44,7 @@ func (h *SolverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("algorithm failed", "error", err)
 		if errors.Is(err, r.Context().Err()) {
-			h.writeError(w, "request cancelled", http.StatusRequestTimeout)
+			h.writeError(w, "request timeout", http.StatusRequestTimeout)
 			return
 		}
 		h.writeError(w, err.Error(), http.StatusInternalServerError)

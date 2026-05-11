@@ -17,22 +17,22 @@ func New() port.MaxFlowSolver {
 }
 
 type residualGraph struct {
-	cap     map[string]map[string]float64
-	adj     map[string][]string
-	nodes   []string
-	nodeSet map[string]bool
+	cap   map[string]map[string]float64
+	adj   map[string][]string
+	nodes []string
 }
 
 func newResidualGraph(edges []entity.Edge) *residualGraph {
 	rg := &residualGraph{
-		cap:     make(map[string]map[string]float64),
-		adj:     make(map[string][]string),
-		nodeSet: make(map[string]bool),
+		cap: make(map[string]map[string]float64),
+		adj: make(map[string][]string),
 	}
 
+	nodeSet := make(map[string]bool)
+
 	addNode := func(v string) {
-		if !rg.nodeSet[v] {
-			rg.nodeSet[v] = true
+		if !nodeSet[v] {
+			nodeSet[v] = true
 			rg.nodes = append(rg.nodes, v)
 			rg.cap[v] = make(map[string]float64)
 		}
@@ -41,9 +41,7 @@ func newResidualGraph(edges []entity.Edge) *residualGraph {
 	for _, e := range edges {
 		addNode(e.From)
 		addNode(e.To)
-
 		rg.cap[e.From][e.To] += e.Capacity
-
 		rg.addNeighbor(e.From, e.To)
 		rg.addNeighbor(e.To, e.From)
 	}
@@ -52,8 +50,8 @@ func newResidualGraph(edges []entity.Edge) *residualGraph {
 }
 
 func (rg *residualGraph) addNeighbor(u, v string) {
-	for _, existing := range rg.adj[u] {
-		if existing == v {
+	for _, x := range rg.adj[u] {
+		if x == v {
 			return
 		}
 	}
@@ -61,10 +59,9 @@ func (rg *residualGraph) addNeighbor(u, v string) {
 }
 
 func (rg *residualGraph) bfs(source, sink string) map[string]string {
-	parent := make(map[string]string, len(rg.nodes))
+	parent := make(map[string]string)
 	parent[source] = ""
-	queue := make([]string, 0, len(rg.nodes))
-	queue = append(queue, source)
+	queue := []string{source}
 
 	for len(queue) > 0 {
 		curr := queue[0]
@@ -80,12 +77,11 @@ func (rg *residualGraph) bfs(source, sink string) map[string]string {
 			}
 		}
 	}
-
 	return nil
 }
 
 func reconstructPath(parent map[string]string, source, sink string) []string {
-	path := make([]string, 0)
+	path := []string{}
 	for curr := sink; curr != source; curr = parent[curr] {
 		path = append([]string{curr}, path...)
 	}
@@ -113,30 +109,15 @@ func (rg *residualGraph) augment(path []string, delta float64) {
 func (rg *residualGraph) snapshot(originalEdges []entity.Edge) []entity.FlowEdge {
 	result := make([]entity.FlowEdge, len(originalEdges))
 	for i, e := range originalEdges {
+		flow := e.Capacity - rg.cap[e.From][e.To]
 		result[i] = entity.FlowEdge{
 			From:     e.From,
 			To:       e.To,
 			Capacity: e.Capacity,
-			Flow:     e.Capacity - rg.cap[e.From][e.To],
+			Flow:     flow,
 		}
 	}
 	return result
-}
-
-func (rg *residualGraph) residualSnapshot() []entity.ResidualEdge {
-	edges := make([]entity.ResidualEdge, 0)
-	for _, u := range rg.nodes {
-		for _, v := range rg.adj[u] {
-			if rg.cap[u][v] > 0 {
-				edges = append(edges, entity.ResidualEdge{
-					From:     u,
-					To:       v,
-					Capacity: rg.cap[u][v],
-				})
-			}
-		}
-	}
-	return edges
 }
 
 func (rg *residualGraph) minCutVertices(source string) []string {
@@ -155,7 +136,7 @@ func (rg *residualGraph) minCutVertices(source string) []string {
 		}
 	}
 
-	result := make([]string, 0, len(visited))
+	var result []string
 	for v := range visited {
 		result = append(result, v)
 	}
@@ -166,16 +147,11 @@ func (ek *EdmondsKarp) Solve(ctx context.Context, graph entity.Graph) (entity.Re
 	if graph.Source == graph.Sink {
 		return entity.Result{}, fmt.Errorf("source и sink не могут совпадать")
 	}
-	if len(graph.Edges) == 0 {
-		return entity.Result{}, fmt.Errorf("граф не содержит рёбер")
-	}
 
 	rg := newResidualGraph(graph.Edges)
-	var (
-		totalFlow float64
-		steps     []entity.Step
-		iteration int
-	)
+	var totalFlow float64
+	var steps []entity.Step
+	iteration := 0
 
 	for {
 		select {
@@ -197,15 +173,12 @@ func (ek *EdmondsKarp) Solve(ctx context.Context, graph entity.Graph) (entity.Re
 		iteration++
 
 		steps = append(steps, entity.Step{
-			Iteration:     iteration,
-			Path:          path,
-			Bottleneck:    delta,
-			Edges:         rg.snapshot(graph.Edges),
-			ResidualEdges: rg.residualSnapshot(),
-			Message: fmt.Sprintf(
-				"Итерация %d: путь [%s], узкое место Δ = %.0f, суммарный поток = %.0f",
-				iteration, formatPath(path), delta, totalFlow,
-			),
+			Iteration:  iteration,
+			Path:       path,
+			Bottleneck: delta,
+			Edges:      rg.snapshot(graph.Edges),
+			Message: fmt.Sprintf("Итерация %d: путь [%s], Δ = %.0f, поток = %.0f",
+				iteration, formatPath(path), delta, totalFlow),
 		})
 	}
 

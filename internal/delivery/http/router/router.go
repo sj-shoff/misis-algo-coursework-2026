@@ -1,4 +1,4 @@
-package http
+package router
 
 import (
 	"algo-coursework/internal/delivery/http/handler"
